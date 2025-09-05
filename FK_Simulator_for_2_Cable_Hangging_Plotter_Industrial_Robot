@@ -1,0 +1,203 @@
+import numpy as np
+import matplotlib
+matplotlib.use("TkAgg")  # embed matplotlib in Tkinter
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.animation as animation
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
+
+# ====== Workspace Anchors ======
+W = 10.0
+H = 8.0
+left_anchor = np.array([0.0, H])
+right_anchor = np.array([W, H])
+
+# ====== Forward Kinematics (Hanging Plotter) ======
+def fk(L_left, L_right):
+    """
+    Given left and right cable lengths, return (x,y) position of the pen.
+    Intersection of two circles centered at anchors with radii = cable lengths.
+    """
+    x1, y1 = left_anchor
+    x2, y2 = right_anchor
+
+    d = np.linalg.norm([x2 - x1, y2 - y1])
+    if d > L_left + L_right or d < abs(L_left - L_right):
+        return None  # no solution (out of workspace)
+
+    # Circle intersection math
+    a = (L_left**2 - L_right**2 + d**2) / (2*d)
+    h = np.sqrt(max(L_left**2 - a**2, 0))
+
+    xm = x1 + a * (x2 - x1) / d
+    ym = y1 + a * (y2 - y1) / d
+
+    # Two possible solutions (choose lower one = hanging)
+    xs1 = xm + h * (y2 - y1) / d
+    ys1 = ym - h * (x2 - x1) / d
+    xs2 = xm - h * (y2 - y1) / d
+    ys2 = ym + h * (x2 - x1) / d
+
+    if ys1 < ys2:
+        return xs1, ys1
+    else:
+        return xs2, ys2
+
+# ====== Globals ======
+ani = None
+is_paused = False
+frame_index = 0
+times, L_left_list, L_right_list = [], [], []
+x_history, y_history = [], []
+
+# ====== Animate function ======
+def animate(i):
+    global frame_index
+
+    if is_paused:
+        return line_left, line_right, end_eff, trace, end_eff_text
+
+    if frame_index >= len(L_left_list):
+        return line_left, line_right, end_eff, trace, end_eff_text
+
+    L_left, L_right = L_left_list[frame_index], L_right_list[frame_index]
+    pos = fk(L_left, L_right)
+
+    if pos is None:
+        frame_index += 1
+        return line_left, line_right, end_eff, trace, end_eff_text
+
+    x, y = pos
+
+    # Update cables and end effector
+    line_left.set_data([left_anchor[0], x], [left_anchor[1], y])
+    line_right.set_data([right_anchor[0], x], [right_anchor[1], y])
+    end_eff.set_data([x], [y])
+
+    # trace path
+    x_history.append(x)
+    y_history.append(y)
+    trace.set_data(x_history, y_history)
+
+    # update info box
+    end_eff_text.set_text(
+        f"t = {times[frame_index]:.2f}\nL_left = {L_left:.2f}\nL_right = {L_right:.2f}"
+    )
+
+    # highlight current line in text box
+    text_box.tag_remove("highlight", "1.0", tk.END)
+    line_number = f"{frame_index+1}.0"
+    text_box.tag_add("highlight", line_number, f"{line_number} lineend")
+    text_box.tag_config("highlight", background="yellow", foreground="black")
+    text_box.see(line_number)
+
+    frame_index += 1
+    return line_left, line_right, end_eff, trace, end_eff_text
+
+# ====== Run Trajectory ======
+def run_trajectory():
+    global ani, times, L_left_list, L_right_list, x_history, y_history, frame_index, is_paused
+
+    raw_text = text_box.get("1.0", tk.END).strip()
+    if not raw_text:
+        messagebox.showwarning("Warning", "No data pasted!")
+        return
+
+    # Parse pasted data (t, L_left, L_right)
+    lines = raw_text.splitlines()
+    times, L_left_list, L_right_list = [], [], []
+    for line in lines:
+        parts = line.split(",")
+        if len(parts) >= 3:
+            try:
+                t = float(parts[0])
+                L1 = float(parts[1])
+                L2 = float(parts[2])
+                times.append(t)
+                L_left_list.append(L1)
+                L_right_list.append(L2)
+            except ValueError:
+                continue
+
+    if not L_left_list:
+        messagebox.showerror("Error", "Invalid data format!")
+        return
+
+    # Reset state
+    x_history, y_history = [], []
+    frame_index = 0
+    is_paused = False
+    pause_btn.config(text="Pause")
+    text_box.tag_remove("highlight", "1.0", tk.END)
+
+    # Clear previous animation
+    if ani:
+        ani.event_source.stop()
+
+    ani = animation.FuncAnimation(
+        fig, animate,
+        frames=len(L_left_list),
+        interval=500,
+        blit=True,
+        repeat=True,
+        cache_frame_data=False
+    )
+    canvas.draw()
+
+# ====== Pause/Resume ======
+def toggle_pause():
+    global is_paused
+    is_paused = not is_paused
+    pause_btn.config(text="Resume" if is_paused else "Pause")
+
+# ====== Tkinter GUI ======
+root = tk.Tk()
+root.title("2-Cable Hanging Plotter - Forward Kinematics Simulator")
+
+# Layout: left text box, right plot
+frame = tk.Frame(root)
+frame.pack(fill="both", expand=True)
+
+# Textbox for trajectory
+text_box = scrolledtext.ScrolledText(frame, width=30, height=20, wrap=tk.WORD)
+text_box.pack(side="left", fill="y", padx=5, pady=5)
+
+example_text = "0,6,8\n1,7,7\n2,8,6\n3,7,7\n4,6,8"
+text_box.insert(tk.END, example_text)
+
+# Matplotlib Figure
+fig, ax = plt.subplots(figsize=(5,5))
+ax.set_xlim(-1, W+1)
+ax.set_ylim(-1, H+1)
+ax.set_aspect("equal")
+ax.set_title("Hanging Plotter - FK Animation")
+
+# Draw workspace rectangle
+ax.plot([0, W, W, 0, 0], [0, 0, H, H, 0], 'k-', lw=1.5)
+
+# Anchors
+ax.plot(left_anchor[0], left_anchor[1], 'ks', ms=8)
+ax.plot(right_anchor[0], right_anchor[1], 'ks', ms=8)
+
+# moving parts
+line_left, = ax.plot([], [], 'b-', lw=2)
+line_right, = ax.plot([], [], 'b-', lw=2)
+end_eff, = ax.plot([], [], 'ro', markersize=8)
+trace, = ax.plot([], [], 'r--', lw=1)
+end_eff_text = ax.text(0.05, 0.98, '', transform=ax.transAxes, va="top")
+
+canvas = FigureCanvasTkAgg(fig, master=frame)
+canvas.get_tk_widget().pack(side="right", fill="both", expand=True)
+
+# Control buttons
+button_frame = tk.Frame(root)
+button_frame.pack(pady=5)
+
+run_btn = tk.Button(button_frame, text="Run Trajectory", command=run_trajectory)
+run_btn.pack(side="left", padx=5)
+
+pause_btn = tk.Button(button_frame, text="Pause", command=toggle_pause)
+pause_btn.pack(side="left", padx=5)
+
+root.mainloop()

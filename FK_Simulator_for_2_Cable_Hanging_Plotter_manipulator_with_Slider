@@ -1,0 +1,72 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
+
+# ====== Geometry ======
+W = 10.0   # workspace width
+H = 8.0    # workspace height
+left_anchor = np.array([0.0, H])
+right_anchor = np.array([W, H])
+
+# ====== FK: compute cable lengths given pen (x, y) ======
+def fk_cables(x, y):
+    L_left = np.sqrt((x - left_anchor[0])**2 + (y - left_anchor[1])**2)
+    L_right = np.sqrt((x - right_anchor[0])**2 + (y - right_anchor[1])**2)
+    return L_left, L_right
+
+# ====== Initial EE Position ======
+x0, y0 = W/2, H/2
+L_left0, L_right0 = fk_cables(x0, y0)
+
+# ====== Plot Setup ======
+fig, ax = plt.subplots()
+plt.subplots_adjust(left=0.1, bottom=0.25)
+ax.set_xlim(-1, W+1)
+ax.set_ylim(-1, H+1)
+ax.set_aspect("equal")
+ax.set_title("Hanging Cable Plotter - FK with Sliders")
+
+# Draw workspace rectangle
+rect = plt.Rectangle((0, 0), W, H, fill=False, color="black", lw=1.5)
+ax.add_patch(rect)
+
+# Anchors
+ax.plot(left_anchor[0], left_anchor[1], 'ks', ms=8)
+ax.plot(right_anchor[0], right_anchor[1], 'ks', ms=8)
+
+# Robot elements
+line_left, = ax.plot([], [], 'o-', lw=2, color="blue")
+line_right, = ax.plot([], [], 'o-', lw=2, color="blue")
+pen, = ax.plot([], [], 'ro', ms=10)
+text_lengths = ax.text(1.05, 0.95, '', transform=ax.transAxes, va='top')
+
+# ====== Update Plot ======
+def update_plot(x, y):
+    # Cable lengths
+    L_left, L_right = fk_cables(x, y)
+
+    # Update lines
+    line_left.set_data([left_anchor[0], x], [left_anchor[1], y])
+    line_right.set_data([right_anchor[0], x], [right_anchor[1], y])
+    pen.set_data([x], [y])
+
+    text_lengths.set_text(f"L_left = {L_left:.2f}\nL_right = {L_right:.2f}")
+
+    fig.canvas.draw_idle()
+
+update_plot(x0, y0)
+
+# ====== Sliders for X, Y ======
+ax_x = plt.axes([0.2, 0.15, 0.65, 0.03])
+ax_y = plt.axes([0.2, 0.1, 0.65, 0.03])
+
+slider_x = Slider(ax_x, 'X pos', 0.0, W, valinit=x0)
+slider_y = Slider(ax_y, 'Y pos', 0.0, H, valinit=y0)
+
+def slider_update(val):
+    update_plot(slider_x.val, slider_y.val)
+
+slider_x.on_changed(slider_update)
+slider_y.on_changed(slider_update)
+
+plt.show()

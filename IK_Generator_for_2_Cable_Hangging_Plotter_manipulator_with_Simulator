@@ -1,0 +1,145 @@
+import numpy as np
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+# ====== Plotter Parameters ======
+L = 10.0  # Width of workspace (distance between top anchors)
+H = 10.0  # Height of workspace (anchor height)
+
+# ====== Inverse Kinematics for 2-Cable Hanging Plotter ======
+def ik(x, y):
+    """
+    For 2-cable hanging plotter:
+    Anchors at (0, H) and (L, H)
+    q1 -> left cable length
+    q2 -> right cable length
+    """
+    q1 = np.sqrt((x - 0)**2 + (y - H)**2)
+    q2 = np.sqrt((x - L)**2 + (y - H)**2)
+    return q1, q2
+
+# ====== Run IK and Save Output ======
+def run_ik():
+    try:
+        # Get user input
+        x_expr = x_entry.get()
+        y_expr = y_entry.get()
+        t_end = float(t_entry.get())
+        steps = int(steps_entry.get())
+
+        # Generate time vector
+        t = np.linspace(0, t_end, steps)
+
+        # Evaluate user functions for x(t), y(t)
+        x_vals = [eval(x_expr, {"t": val, "np": np}) for val in t]
+        y_vals = [eval(y_expr, {"t": val, "np": np}) for val in t]
+
+        # Do IK
+        q1s, q2s = [], []
+        for x, y in zip(x_vals, y_vals):
+            q1, q2 = ik(x, y)
+            q1s.append(q1)
+            q2s.append(q2)
+
+        # Save CSV
+        data = {"time": t, "q1 (left cable)": q1s, "q2 (right cable)": q2s}
+        df = pd.DataFrame(data)
+
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv",
+                                                 filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            df.to_csv(file_path, index=False)
+            messagebox.showinfo("Success", f"File saved as {file_path}")
+
+        # Launch simulator
+        simulate(x_vals, y_vals, q1s, q2s)
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+# ====== Simulator (Animation) ======
+def simulate(x_vals, y_vals, q1s, q2s):
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, L )
+    ax.set_ylim(0, H )
+    ax.set_aspect("equal")
+    ax.set_title("2-Cable Hanging Plotter Simulator")
+
+    # Anchor points for cables (top left and top right)
+    left_anchor = (0, H)
+    right_anchor = (L, H)
+
+    # Plot fixed motor positions
+    ax.plot([0, L], [H, H], 'ko', markersize=6)
+
+    # Cables
+    left_cable, = ax.plot([], [], 'b-', lw=2)
+    right_cable, = ax.plot([], [], 'g-', lw=2)
+
+    # End effector (dot)
+    end_eff, = ax.plot([], [], 'ro', markersize=8)
+
+    # Trace path
+    trace, = ax.plot([], [], 'r--', lw=1)
+    x_history, y_history = [], []
+
+    # Info box
+    info_text = ax.text(0.02, 0.95, '', transform=ax.transAxes, fontsize=10,
+                        verticalalignment='top', bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.7))
+
+    def update(i):
+        x, y = x_vals[i], y_vals[i]
+
+        # Update cables
+        left_cable.set_data([left_anchor[0], x], [left_anchor[1], y])
+        right_cable.set_data([right_anchor[0], x], [right_anchor[1], y])
+
+        # Update end effector
+        end_eff.set_data([x], [y])
+
+        # Trace
+        x_history.append(x)
+        y_history.append(y)
+        trace.set_data(x_history, y_history)
+
+        # Update info
+        info_text.set_text(f"Step: {i+1}\nq1 = {q1s[i]:.2f}\nq2 = {q2s[i]:.2f}")
+
+        return left_cable, right_cable, end_eff, trace, info_text
+
+    ani = animation.FuncAnimation(fig, update, frames=len(x_vals),
+                                  interval=100, blit=False, repeat=False)
+
+    plt.show()
+
+# ====== GUI Setup ======
+root = tk.Tk()
+root.title("2-Cable Plotter - IK Generator & Simulator")
+
+tk.Label(root, text="x(t) function:").grid(row=0, column=0, sticky="w")
+x_entry = tk.Entry(root, width=40)
+x_entry.insert(0, "5 + 3*np.cos(6*t)*np.cos(t)")  # default
+x_entry.grid(row=0, column=1)
+
+tk.Label(root, text="y(t) function:").grid(row=1, column=0, sticky="w")
+y_entry = tk.Entry(root, width=40)
+y_entry.insert(0, "5 + 3*np.cos(6*t)*np.sin(t)")  # default
+y_entry.grid(row=1, column=1)
+
+tk.Label(root, text="Simulation time (t_end):").grid(row=2, column=0, sticky="w")
+t_entry = tk.Entry(root, width=20)
+t_entry.insert(0, "6.28")
+t_entry.grid(row=2, column=1, sticky="w")
+
+tk.Label(root, text="Steps:").grid(row=3, column=0, sticky="w")
+steps_entry = tk.Entry(root, width=20)
+steps_entry.insert(0, "200")
+steps_entry.grid(row=3, column=1, sticky="w")
+
+run_button = tk.Button(root, text="Generate IK + Simulate", command=run_ik)
+run_button.grid(row=4, column=0, columnspan=2, pady=10)
+
+root.mainloop()
